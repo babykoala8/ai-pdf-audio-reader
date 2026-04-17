@@ -286,7 +286,8 @@ let currentChapter= 0;
 let autoPlayTimer = null;
 let countdownTimer= null;
 let isPlaying     = false;
-let pendingUtterances = []; // 浏览器原生队列
+let currentChunks     = []; // 当前朗读队列
+let currentIdx       = 0;  // 当前读到第几句
 
 // PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -496,7 +497,7 @@ function updatePlayButton() {
   }
 }
 
-function startPlayback(text) {
+function startPlayback(text, fromIdx = 0) {
   if (!text || !text.trim()) return;
 
   // 切小块，按 \n 分割
@@ -506,57 +507,59 @@ function startPlayback(text) {
   // 停止现有朗读（带黄金延迟）
   synth.cancel();
 
-  isPlaying = true;
-  updatePlayButton();
+  // 等待引擎真正停下来
+  setTimeout(() => {
+    currentChunks = chunks;
+    currentIdx = fromIdx;
+    isPlaying = true;
+    updatePlayButton();
+    speakNext();
+  }, 110);
+}
 
-  let idx = 0;
-
-  function speakNext() {
-    if (idx >= chunks.length) {
-      isPlaying = false;
-      updatePlayButton();
-      return;
-    }
-    const u = new SpeechSynthesisUtterance(chunks[idx]);
-    u.lang = 'zh-CN';
-    u.rate = 1.0;
-    u.pitch = 1.0;
-    u.onend = () => {
-      idx++;
-      speakNext();
-    };
-    u.onerror = () => {
-      idx++;
-      speakNext();
-    };
-    synth.speak(u);
+function speakNext() {
+  if (currentIdx >= currentChunks.length) {
+    isPlaying = false;
+    updatePlayButton();
+    currentIdx = 0;
+    return;
   }
-
-  // 0.1秒黄金延迟后再开始
-  setTimeout(speakNext, 100);
+  const u = new SpeechSynthesisUtterance(currentChunks[currentIdx]);
+  u.lang = 'zh-CN';
+  u.rate = 1.0;
+  u.pitch = 1.0;
+  u.onend = () => {
+    currentIdx++;
+    speakNext();
+  };
+  u.onerror = () => {
+    currentIdx++;
+    speakNext();
+  };
+  synth.speak(u);
 }
 
 function togglePlayPause() {
   if (isPlaying) {
+    // 正在朗读 → 暂停
     synth.pause();
     isPlaying = false;
     updatePlayButton();
   } else {
-    if (synth.paused) {
+    // 暂停状态 → 恢复
+    // 等 50ms 让引擎状态同步，再 resume
+    setTimeout(() => {
       synth.resume();
       isPlaying = true;
       updatePlayButton();
-    } else {
-      // 从头/从光标读
-      const text = getTextToRead();
-      startPlayback(text);
-    }
+    }, 50);
   }
 }
 
 function stopPlayback() {
   synth.cancel();
   isPlaying = false;
+  currentIdx = 0;
   updatePlayButton();
 }
 
