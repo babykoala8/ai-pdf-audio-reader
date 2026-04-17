@@ -518,26 +518,47 @@ function startPlayback(text, fromIdx = 0) {
   }, 100);
 }
 
+let isSpeakingThisChunk = false; // 防止 onend 和 speakNext 重叠双发
+
 function speakNext() {
+  // 已停止或已暂停，不再继续
+  if (!isPlaying) return;
   if (currentIdx >= currentChunks.length) {
     isPlaying = false;
-    updatePlayButton();
+    isPaused = false;
     currentIdx = 0;
+    updatePlayButton();
     return;
   }
-  const u = new SpeechSynthesisUtterance(currentChunks[currentIdx]);
+  // 防止浏览器还没回调 onend 就重复调用
+  if (isSpeakingThisChunk) return;
+  isSpeakingThisChunk = true;
+
+  const text = currentChunks[currentIdx];
+  if (!text || !text.trim()) {
+    isSpeakingThisChunk = false;
+    currentIdx++;
+    speakNext();
+    return;
+  }
+
+  const u = new SpeechSynthesisUtterance(text);
   u.lang = 'zh-CN';
   u.rate = 1.0;
   u.pitch = 1.0;
   u.onend = () => {
+    isSpeakingThisChunk = false;
+    if (!isPlaying) return; // 防止 stop 后 onend 回来又继续
     currentIdx++;
     speakNext();
   };
   u.onerror = () => {
+    isSpeakingThisChunk = false;
+    if (!isPlaying) return;
     currentIdx++;
     speakNext();
   };
-  window.currentUtterance = u; // 防GC补丁：按住内存防止浏览器忘掉正在读的句子
+  window.currentUtterance = u; // 防GC补丁
   synth.speak(u);
 }
 
@@ -551,6 +572,7 @@ function togglePlayPause() {
   } else {
     // 继续：从 currentIdx 位置继续读
     if (isPaused && currentChunks.length > 0) {
+      // 确保 cancel 彻底停掉上一次的语音
       synth.cancel();
       setTimeout(() => {
         isPlaying = true;
@@ -558,10 +580,6 @@ function togglePlayPause() {
         updatePlayButton();
         speakNext();
       }, 100);
-    } else {
-      // 没有任何内容，从头读
-      const text = getTextToRead();
-      startPlayback(text);
     }
   }
 }
@@ -725,6 +743,11 @@ btnPlay.addEventListener('click', () => {
 btnStop.addEventListener('click', () => {
   stopPlayback();
   cancelAutoPlay();
+});
+
+// 页面刷新/关闭时，确保音频停止
+window.addEventListener('beforeunload', () => {
+  synth.cancel();
 });
 
 // 状态监听：TTS 引擎状态变化 → 同步按钮
