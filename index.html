@@ -286,6 +286,7 @@ let currentChapter= 0;
 let autoPlayTimer = null;
 let countdownTimer= null;
 let isPlaying     = false;
+let isPaused      = false; // 暂停标记（自己管理，不依赖 synth.paused）
 let currentChunks     = []; // 当前朗读队列
 let currentIdx       = 0;  // 当前读到第几句
 
@@ -504,17 +505,17 @@ function startPlayback(text, fromIdx = 0) {
   const chunks = text.split('\n').filter(l => l.trim().length > 0);
   if (chunks.length === 0) return;
 
-  // 停止现有朗读（带黄金延迟）
+  // 停止现有朗读
   synth.cancel();
 
-  // 等待引擎真正停下来
   setTimeout(() => {
     currentChunks = chunks;
     currentIdx = fromIdx;
     isPlaying = true;
+    isPaused = false;
     updatePlayButton();
     speakNext();
-  }, 110);
+  }, 100);
 }
 
 function speakNext() {
@@ -541,25 +542,36 @@ function speakNext() {
 
 function togglePlayPause() {
   if (isPlaying) {
-    // 正在朗读 → 暂停
-    synth.pause();
+    // 正在朗读 → 取消当前朗读（保留 currentIdx）
+    synth.cancel();
     isPlaying = false;
+    isPaused = true;
     updatePlayButton();
   } else {
-    // 暂停状态 → 恢复
-    // 等 50ms 让引擎状态同步，再 resume
-    setTimeout(() => {
-      synth.resume();
-      isPlaying = true;
-      updatePlayButton();
-    }, 50);
+    // 继续：从 currentIdx 位置继续读
+    if (isPaused && currentChunks.length > 0) {
+      synth.cancel();
+      setTimeout(() => {
+        isPlaying = true;
+        isPaused = false;
+        updatePlayButton();
+        speakNext();
+      }, 100);
+    } else {
+      // 没有任何内容，从头读
+      const text = getTextToRead();
+      startPlayback(text);
+    }
   }
 }
 
 function stopPlayback() {
   synth.cancel();
   isPlaying = false;
+  isPaused = false;
   currentIdx = 0;
+  updatePlayButton();
+
   updatePlayButton();
 }
 
