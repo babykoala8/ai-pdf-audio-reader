@@ -595,14 +595,20 @@ function stopPlayback() {
 }
 
 function getTextToRead() {
-  // 优先：用户划选文字
+  const ta = textDisplay;
+
+  // 第一优先：鼠标高亮划选的文字
   const selection = window.getSelection().toString();
   if (selection && selection.trim().length > 0) return selection.trim();
 
-  // 次优先：光标位置到结尾
-  const ta = textDisplay;
+  // 第二优先：光标点击位置 → 读到结尾
   if (ta.selectionStart !== ta.selectionEnd) {
+    // 有高亮文字（边缘情况，走上面）
     return ta.value.substring(ta.selectionStart, ta.selectionEnd).trim();
+  }
+  if (ta.selectionStart !== undefined) {
+    // 仅光标点击，无划选 → 从光标到结尾
+    return ta.value.substring(ta.selectionStart).trim();
   }
 
   // 默认：全文
