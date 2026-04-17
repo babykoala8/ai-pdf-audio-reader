@@ -537,6 +537,7 @@ function speakNext() {
     currentIdx++;
     speakNext();
   };
+  window.currentUtterance = u; // 防GC补丁：按住内存防止浏览器忘掉正在读的句子
   synth.speak(u);
 }
 
