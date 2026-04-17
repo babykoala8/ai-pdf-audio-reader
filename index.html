@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 智能 PDF 有声书阅读器</title>
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --text-muted: #6b7280;
+      --accent: #00819f;
+      --btn-play: #22c55e;
+      --btn-pause: #eab308;
+      --btn-stop: #ef4444;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    /* ── 控制台卡片 ── */
+    .console-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+
+    .status-bar {
+      height: 32px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .status-bar.error { background: #fee2e2; color: var(--btn-stop); }
+    .status-bar.success { background: #dcfce7; color: var(--btn-play); }
+
+    .progress-wrap {
+      height: 6px;
+      background: #e5e7eb;
+      border-radius: 3px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      display: none;
+    }
+    .progress-wrap.active { display: block; }
+    .progress-bar {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      border-radius: 3px;
+      transition: width 0.2s;
+    }
+
+    .upload-area {
+      border: 2px dashed #d1d5db;
+      border-radius: var(--radius);
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 16px;
+    }
+    .upload-area:hover { border-color: var(--accent); background: #f0f9ff; }
+    .upload-area.dragover { border-color: var(--accent); background: #e0f2fe; }
+
+    .upload-icon { font-size: 2.5rem; margin-bottom: 8px; }
+    .upload-hint { color: var(--text-muted); font-size: 0.9rem; }
+
+    #fileInput { display: none; }
+
+    .countdown-banner {
+      text-align: center;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-top: 8px;
+      display: none;
+    }
+    .countdown-banner.active { display: block; }
+    .countdown-banner span { color: var(--btn-pause); font-weight: 700; }
+
+    /* ── 阅读区卡片 ── */
+    .reader-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .controls-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    select#chapterSelect {
+      flex: 1;
+      min-width: 200px;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+
+    .btn-group { display: flex; gap: 8px; }
+
+    .btn {
+      padding: 9px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      color: #fff;
+    }
+    .btn:hover { opacity: 0.85; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+
+    .btn-play   { background: var(--btn-play); }
+    .btn-pause  { background: var(--btn-pause); color: #1a1a2e; }
+    .btn-stop   { background: var(--btn-stop); }
+
+    .text-display {
+      width: 100%;
+      min-height: 360px;
+      border: 1px solid #d1d5db;
+      border-radius: var(--radius);
+      padding: 16px;
+      font-size: 1rem;
+      line-height: 1.8;
+      resize: vertical;
+      background: #fafafa;
+      color: var(--text);
+      outline: none;
+    }
+    .text-display:focus { border-color: var(--accent); background: #fff; }
+
+    .text-display::selection { background: #bfdbfe; }
+
+    .empty-hint {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      text-align: center;
+      padding: 80px 0;
+    }
+
+    /* ── 加载提示 ── */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(255,255,255,0.92);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      display: none;
+    }
+    .loading-overlay.active { display: flex; }
+    .loading-spinner {
+      width: 40px; height: 40px;
+      border: 3px solid #e5e7eb;
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- 控制台卡片 -->
+  <div class="console-card">
+    <div class="title">📖 AI 智能 PDF 有声书阅读器</div>
+
+    <div class="status-bar" id="statusBar">等待上传 PDF 文件…</div>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <div class="upload-area" id="uploadArea">
+      <div class="upload-icon">📄</div>
+      <div class="upload-hint">点击或拖拽 PDF 文件到这里</div>
+    </div>
+    <input type="file" id="fileInput" accept=".pdf">
+
+    <div class="countdown-banner" id="countdownBanner">
+      即将自动播放前 3 章… 还剩 <span id="countdownNum">60</span> 秒
+    </div>
+  </div>
+
+  <!-- 阅读区卡片 -->
+  <div class="reader-card">
+    <div class="controls-row">
+      <select id="chapterSelect" disabled>
+        <option value="">— 先上传 PDF —</option>
+      </select>
+      <div class="btn-group">
+        <button class="btn btn-play" id="btnPlay">播放</button>
+        <button class="btn btn-stop" id="btnStop">停止</button>
+      </div>
+    </div>
+
+    <div id="textContainer">
+      <div class="empty-hint" id="emptyHint">📕 PDF 内容将显示在这里</div>
+      <textarea class="text-display" id="textDisplay" style="display:none"
+        placeholder="选中的章节内容会显示在这里…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- 加载遮罩（CDN 资源加载时显示）-->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div>正在加载解析引擎…</div>
+</div>
+
+<!-- ════════════════════════════════════
+     CDN: PDF.js + Tesseract.js
+     ════════════════════════════════════ -->
+<script src="https://fastly.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://fastly.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+/* ════════════════════════════════════════════════════════════
+   AI Smart PDF Reader — 核心逻辑
+   ════════════════════════════════════════════════════════════ */
+
+const synth = window.speechSynthesis;
+
+// ── DOM 引用 ──────────────────────────────────────────────
+const statusBar     = document.getElementById('statusBar');
+const progressWrap   = document.getElementById('progressWrap');
+const progressBar    = document.getElementById('progressBar');
+const uploadArea     = document.getElementById('uploadArea');
+const fileInput      = document.getElementById('fileInput');
+const countdownBanner= document.getElementById('countdownBanner');
+const countdownNum   = document.getElementById('countdownNum');
+const chapterSelect  = document.getElementById('chapterSelect');
+const btnPlay        = document.getElementById('btnPlay');
+const btnStop        = document.getElementById('btnStop');
+const textDisplay    = document.getElementById('textDisplay');
+const emptyHint      = document.getElementById('emptyHint');
+const loadingOverlay= document.getElementById('loadingOverlay');
+
+// ── 全局状态 ──────────────────────────────────────────────
+let pdfDoc        = null;
+let chapters      = [];   // [{title, pageStart, pageEnd, text}]
+let currentChapter= 0;
+let autoPlayTimer = null;
+let countdownTimer= null;
+let isPlaying     = false;
+let pendingUtterances = []; // 浏览器原生队列
+
+// PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://fastly.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
+// ════════════════════════════════════════════════════════════
+//  工具函数
+// ════════════════════════════════════════════════════════════
+
+function setStatus(msg, type = '') {
+  statusBar.textContent = msg;
+  statusBar.className = 'status-bar' + (type ? ' ' + type : '');
+}
+
+function showProgress(pct) {
+  progressWrap.classList.add('active');
+  progressBar.style.width = pct + '%';
+}
+
+function hideProgress() {
+  progressWrap.classList.remove('active');
+  progressBar.style.width = '0%';
+}
+
+// 净化目录行：去掉 ".... 12" 这样的页码和填充符
+function sanitizeTOCLine(raw) {
+  return raw
+    .replace(/\.{2,}/g, ' ')      // 点点→空格
+    .replace(/\s+\d+\s*$/g, '')    // 尾部页码
+    .replace(/^\d+\s+\d+\s*/g, '') // 前部多位数页码
+    .replace(/^\s+|\s+$/g, '')     // trim
+    .trim();
+}
+
+// 判断是否像目录页（页码连续、字数少）
+function looksLikeTOCPage(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length < 3) return false;
+  // 检查是否有数字页码模式
+  const hasDots = /\.{2,}/.test(text);
+  const hasNums = /\b\d{1,4}\b/.test(text);
+  return hasDots && hasNums;
+}
+
+// ════════════════════════════════════════════════════════════
+//  第一遍：光速扫前15页，构建目录树
+// ════════════════════════════════════════════════════════════
+async function fastScanTOC(numPages) {
+  const TOC = [];
+  const limit = Math.min(numPages, 15);
+
+  for (let i = 1; i <= limit; i++) {
+    const page = await pdfDoc.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items.map(it => it.str).join('');
+
+    if (i === 1 || /目\s*录|contents|table of contents/i.test(text)) {
+      // 提取目录行
+      const lines = text.split('\n');
+      for (const raw of lines) {
+        const cleaned = sanitizeTOCLine(raw);
+        // 有效目录标题：正则命中 + 少于30字
+        if (cleaned.length > 0 && cleaned.length < 30 && /第.{0,8}[章节回篇]|chapter|part/i.test(cleaned)) {
+          if (!TOC.includes(cleaned)) TOC.push(cleaned);
+        }
+      }
+    }
+  }
+  return TOC;
+}
+
+// ════════════════════════════════════════════════════════════
+//  第二遍：深度扫描全文，切分章节
+// ════════════════════════════════════════════════════════════
+async function deepScanAllPages(numPages, coreTOC) {
+  chapters = [];
+  let chapterText = '';
+  let chapterTitle = '封面 / 序言';
+  let chapterStartPage = 1;
+
+  const useTOCMode = coreTOC.length > 0;
+
+  for (let i = 1; i <= numPages; i++) {
+    showProgress(Math.round((i / numPages) * 100));
+    setStatus(`深度扫描第 ${i} / ${numPages} 页…`);
+
+    const page = await pdfDoc.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items.map(it => it.str).join('');
+
+    // OCR 降级：字数太少 → 启动 Tesseract
+    let finalText = text;
+    if (text.trim().length < 20) {
+      setStatus(`第 ${i} 页检测为扫描件，启动 OCR…`);
+      try {
+        const canvas = document.createElement('canvas');
+        const viewport = page.getViewport({ scale: 1.5 });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const result = await Tesseract.recognize(canvas, 'eng+chi_sim', { logger: () => {} });
+        finalText = result.data.text;
+      } catch (e) {
+        console.warn('OCR failed:', e);
+      }
+    }
+
+    // ══ 章节切分判断 ══
+    let newChapterTitle = null;
+    const lines = finalText.split('\n');
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.length > 100) continue;
+
+      if (useTOCMode) {
+        // TOC 精准匹配模式
+        if (coreTOC.includes(line) || coreTOC.some(t => line.includes(t) || t.includes(line))) {
+          newChapterTitle = line;
+          break;
+        }
+      } else {
+        // 正则降级盲扫模式
+        if (line.length < 30 && /第.{0,8}[章节回篇]|chapter|part/i.test(line)) {
+          newChapterTitle = line;
+          break;
+        }
+      }
+    }
+
+    if (newChapterTitle) {
+      if (chapterText.length > 0) {
+        chapters.push({
+          title: chapterTitle,
+          pageStart: chapterStartPage,
+          pageEnd: i - 1,
+          text: chapterText.trim()
+        });
+      }
+      chapterTitle = newChapterTitle;
+      chapterStartPage = i;
+      chapterText = '';
+    }
+
+    chapterText += finalText + '\n';
+  }
+
+  // 最后一章
+  if (chapterText.trim()) {
+    chapters.push({
+      title: chapterTitle,
+      pageStart: chapterStartPage,
+      pageEnd: numPages,
+      text: chapterText.trim()
+    });
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  60 秒自动播放
+// ════════════════════════════════════════════════════════════
+function startAutoPlayCountdown() {
+  let secs = 60;
+  countdownBanner.classList.add('active');
+  countdownNum.textContent = secs;
+
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    secs--;
+    countdownNum.textContent = secs;
+    if (secs <= 0) {
+      clearInterval(countdownTimer);
+      countdownBanner.classList.remove('active');
+      autoPlayFirst3Chapters();
+    }
+  }, 1000);
+}
+
+function cancelAutoPlay() {
+  clearInterval(countdownTimer);
+  countdownBanner.classList.remove('active');
+}
+
+function autoPlayFirst3Chapters() {
+  if (chapters.length === 0) return;
+  const first3 = chapters.slice(0, 3);
+  const mergedText = first3.map(c => c.text).join('\n\n');
+  loadChapterText(mergedText);
+  currentChapter = 0;
+  updateChapterSelect(0);
+  // 切换即播
+  setTimeout(() => startPlayback(mergedText), 150);
+}
+
+// ════════════════════════════════════════════════════════════
+//  TTS — 播放 / 暂停 / 停止
+// ════════════════════════════════════════════════════════════
+
+function updatePlayButton() {
+  if (isPlaying) {
+    btnPlay.textContent = '暂停';
+    btnPlay.className = 'btn btn-pause';
+  } else {
+    btnPlay.textContent = '播放';
+    btnPlay.className = 'btn btn-play';
+  }
+}
+
+function startPlayback(text) {
+  if (!text || !text.trim()) return;
+
+  // 切小块，按 \n 分割
+  const chunks = text.split('\n').filter(l => l.trim().length > 0);
+  if (chunks.length === 0) return;
+
+  // 停止现有朗读（带黄金延迟）
+  synth.cancel();
+
+  isPlaying = true;
+  updatePlayButton();
+
+  let idx = 0;
+
+  function speakNext() {
+    if (idx >= chunks.length) {
+      isPlaying = false;
+      updatePlayButton();
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(chunks[idx]);
+    u.lang = 'zh-CN';
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    u.onend = () => {
+      idx++;
+      speakNext();
+    };
+    u.onerror = () => {
+      idx++;
+      speakNext();
+    };
+    synth.speak(u);
+  }
+
+  // 0.1秒黄金延迟后再开始
+  setTimeout(speakNext, 100);
+}
+
+function togglePlayPause() {
+  if (isPlaying) {
+    synth.pause();
+    isPlaying = false;
+    updatePlayButton();
+  } else {
+    if (synth.paused) {
+      synth.resume();
+      isPlaying = true;
+      updatePlayButton();
+    } else {
+      // 从头/从光标读
+      const text = getTextToRead();
+      startPlayback(text);
+    }
+  }
+}
+
+function stopPlayback() {
+  synth.cancel();
+  isPlaying = false;
+  updatePlayButton();
+}
+
+function getTextToRead() {
+  // 优先：用户划选文字
+  const selection = window.getSelection().toString();
+  if (selection && selection.trim().length > 0) return selection.trim();
+
+  // 次优先：光标位置到结尾
+  const ta = textDisplay;
+  if (ta.selectionStart !== ta.selectionEnd) {
+    return ta.value.substring(ta.selectionStart, ta.selectionEnd).trim();
+  }
+
+  // 默认：全文
+  return ta.value.trim();
+}
+
+// ════════════════════════════════════════════════════════════
+//  章节选择器
+// ════════════════════════════════════════════════════════════
+function buildChapterSelect() {
+  chapterSelect.innerHTML = '';
+  if (chapters.length === 0) {
+    chapterSelect.disabled = true;
+    chapterSelect.innerHTML = '<option>— 无章节 —</option>';
+    return;
+  }
+  chapterSelect.disabled = false;
+  chapters.forEach((ch, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `第${i + 1}章 ${ch.title} (p.${ch.pageStart})`;
+    chapterSelect.appendChild(opt);
+  });
+}
+
+function updateChapterSelect(idx) {
+  if (chapterSelect.options[idx]) {
+    chapterSelect.selectedIndex = idx;
+  }
+}
+
+function loadChapterText(text) {
+  emptyHint.style.display = 'none';
+  textDisplay.style.display = 'block';
+  textDisplay.value = text;
+}
+
+// ════════════════════════════════════════════════════════════
+//  文件上传 & 解析
+// ════════════════════════════════════════════════════════════
+async function handleFile(file) {
+  if (!file || file.type !== 'application/pdf') {
+    setStatus('请上传有效的 PDF 文件', 'error');
+    return;
+  }
+
+  loadingOverlay.classList.add('active');
+  stopPlayback();
+  cancelAutoPlay();
+  chapters = [];
+  buildChapterSelect();
+
+  try {
+    setStatus('正在加载 PDF…');
+    const arrayBuffer = await file.arrayBuffer();
+    pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const numPages = pdfDoc.numPages;
+
+    setStatus(`PDF 加载完成，共 ${numPages} 页，开始解析…`);
+    showProgress(0);
+
+    // 第一遍：光速扫目录
+    setStatus('第一遍：扫描目录…');
+    const coreTOC = await fastScanTOC(numPages);
+
+    // 第二遍：深度扫描全文
+    setStatus('第二遍：深度扫描全文，构建章节…');
+    await deepScanAllPages(numPages, coreTOC);
+
+    hideProgress();
+
+    if (chapters.length === 0) {
+      setStatus('未检测到章节，请尝试手动选择内容朗读', '');
+      emptyHint.textContent = '⚠️ 未检测到章节，可直接划选文字播放';
+      emptyHint.style.display = 'block';
+      textDisplay.style.display = 'none';
+    } else {
+      setStatus(`解析完成，共 ${chapters.length} 章`, 'success');
+      buildChapterSelect();
+      // 默认加载第一章
+      loadChapterText(chapters[0].text);
+      currentChapter = 0;
+      updateChapterSelect(0);
+    }
+
+    // 启动 60 秒倒计时
+    startAutoPlayCountdown();
+
+  } catch (err) {
+    console.error(err);
+    setStatus('解析失败：' + err.message, 'error');
+    hideProgress();
+  } finally {
+    loadingOverlay.classList.remove('active');
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  事件绑定
+// ════════════════════════════════════════════════════════════
+
+// 上传
+uploadArea.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+// 拖拽
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadArea.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+
+// 章节切换 → 切换即播
+chapterSelect.addEventListener('change', () => {
+  const idx = parseInt(chapterSelect.value, 10);
+  if (isNaN(idx) || !chapters[idx]) return;
+  currentChapter = idx;
+  const ch = chapters[idx];
+  stopPlayback();
+  cancelAutoPlay();
+  loadChapterText(ch.text);
+  // 切换即播
+  setTimeout(() => startPlayback(ch.text), 150);
+});
+
+// 播放 / 暂停
+btnPlay.addEventListener('click', () => {
+  cancelAutoPlay();
+  togglePlayPause();
+});
+
+// 停止
+btnStop.addEventListener('click', () => {
+  stopPlayback();
+  cancelAutoPlay();
+});
+
+// 状态监听：TTS 引擎状态变化 → 同步按钮
+synth.onstatechange = () => {
+  // 仅在非主动播放时同步（主动播放时由 speakNext 管理）
+  if (!isPlaying) updatePlayButton();
+};
+
+</script>
+</body>
+</html>
