@@ -255,7 +255,7 @@
 <!-- ════════════════════════════════════
      CDN: PDF.js + Tesseract.js
      ════════════════════════════════════ -->
-<script src="https://fastly.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="lib/pdf.min.js"></script>
 <script src="https://fastly.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 /* ════════════════════════════════════════════════════════════
@@ -320,7 +320,53 @@ function sanitizeTOCLine(raw) {
     .replace(/\s+\d+\s*$/g, '')    // 尾部页码
     .replace(/^\d+\s+\d+\s*/g, '') // 前部多位数页码
     .replace(/^\s+|\s+$/g, '')     // trim
+    .replace(/\s+/g, '')             // 去所有空格（处理"第 1 章"→"第1章"）
     .trim();
+}
+
+// 判断一行是否是章节标题（宽松正则 + 长度限制）
+function isChapterTitle(text) {
+  if (!text || text.length < 2 || text.length > 40) return false;
+  // 去掉所有空格后再检测
+  const bare = text.replace(/\s+/g, '');
+  return /^第[一二三四五六七八九十百零0-9]+[章回篇节]|Chapter\s*\d+|Part\s*\d+/i.test(bare);
+}
+
+// 从 PDF.js textContent 重建带换行的文本（利用Y坐标差值判断段落）
+function extractTextWithParagraphs(content) {
+  const items = content.items;
+  if (!items || items.length === 0) return '';
+
+  // 按 Y 坐标分行，Y 差 > 当前字体高度的 0.5 倍视为换段
+  const lines = [];
+  let currentLine = '';
+  let prevY = null;
+  let prevHeight = 10;
+
+  for (const item of items) {
+    if (!item.str || item.str.trim() === '') continue;
+    const tx = item.transform;
+    // tx[0]=scaleX, tx[1]=scaleY, tx[4]=x, tx[5]=y
+    const y = tx[5];
+    const fontSize = Math.abs(tx[0]) > 0 ? Math.abs(tx[0]) * 12 : 12;
+
+    if (prevY !== null && Math.abs(y - prevY) > prevHeight * 0.6) {
+      // 换行了
+      if (currentLine) lines.push(currentLine);
+      currentLine = item.str;
+    } else {
+      if (currentLine === '') {
+        currentLine = item.str;
+      } else {
+        // 同一行，追加（加空格分隔）
+        currentLine += ' ' + item.str;
+      }
+    }
+    prevY = y;
+    prevHeight = fontSize;
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines.join('\n');
 }
 
 // 判断是否像目录页（页码连续、字数少）
@@ -343,15 +389,15 @@ async function fastScanTOC(numPages) {
   for (let i = 1; i <= limit; i++) {
     const page = await pdfDoc.getPage(i);
     const content = await page.getTextContent();
-    const text = content.items.map(it => it.str).join('');
+    const text = extractTextWithParagraphs(content);
 
     if (i === 1 || /目\s*录|contents|table of contents/i.test(text)) {
       // 提取目录行
       const lines = text.split('\n');
       for (const raw of lines) {
         const cleaned = sanitizeTOCLine(raw);
-        // 有效目录标题：正则命中 + 少于30字
-        if (cleaned.length > 0 && cleaned.length < 30 && /第.{0,8}[章节回篇]|chapter|part/i.test(cleaned)) {
+        // 有效目录标题：正则命中 + 长度合理
+        if (isChapterTitle(cleaned)) {
           if (!TOC.includes(cleaned)) TOC.push(cleaned);
         }
       }
@@ -377,11 +423,11 @@ async function deepScanAllPages(numPages, coreTOC) {
 
     const page = await pdfDoc.getPage(i);
     const content = await page.getTextContent();
-    const text = content.items.map(it => it.str).join('');
+    const text = extractTextWithParagraphs(content);
 
     // OCR 降级：字数太少 → 启动 Tesseract
     let finalText = text;
-    if (text.trim().length < 20) {
+    if (text.trim().length < 20 && typeof Tesseract !== 'undefined') {
       setStatus(`第 ${i} 页检测为扫描件，启动 OCR…`);
       try {
         const canvas = document.createElement('canvas');
@@ -395,6 +441,8 @@ async function deepScanAllPages(numPages, coreTOC) {
       } catch (e) {
         console.warn('OCR failed:', e);
       }
+    } else if (text.trim().length < 20) {
+      finalText = '[此页为扫描件，OCR引擎未加载，无法提取文字]';
     }
 
     // ══ 章节切分判断 ══
@@ -406,14 +454,15 @@ async function deepScanAllPages(numPages, coreTOC) {
       if (!line || line.length > 100) continue;
 
       if (useTOCMode) {
-        // TOC 精准匹配模式
-        if (coreTOC.includes(line) || coreTOC.some(t => line.includes(t) || t.includes(line))) {
+        // TOC 精准匹配模式（均去掉空格后比较）
+        const bareLine = line.replace(/\s+/g, '');
+        if (coreTOC.includes(bareLine) || coreTOC.some(t => bareLine.includes(t.replace(/\s+/g,'')) || t.replace(/\s+/g,'').includes(bareLine))) {
           newChapterTitle = line;
           break;
         }
       } else {
-        // 正则降级盲扫模式
-        if (line.length < 30 && /第.{0,8}[章节回篇]|chapter|part/i.test(line)) {
+        // 正则降级盲扫模式：宽松匹配各种章节格式
+        if (isChapterTitle(line)) {
           newChapterTitle = line;
           break;
         }
